@@ -17,14 +17,15 @@ screen = pygame.display.set_mode((1280, 720))
 clock = pygame.time.Clock()
 running = True
 blocksize = 1024
-fftsize = 1024
-succ_samples = 800
+fftsize = 512
+succ_samples = 512
 data = deque()
 spectrum = deque()
 use_trigger = True
 
-last_sample = None
 triggered_index = None
+was_one = False
+background = None
 
 buffer = Buffer()
 
@@ -41,6 +42,8 @@ def callback(indata, frames, time, status):
         global last_sample
         global triggered_index
         global previous
+        global was_one
+        global background
         
         i = buffer.end + 1
         start = buffer.end + 1
@@ -48,45 +51,29 @@ def callback(indata, frames, time, status):
         end = buffer.end
 
         while i < end:
-            if last_sample is not None and triggered_index is None:
-                if last_sample > 1e-3 and indata[i - start, 1] <= -1e-3:
-                    triggered_index = i
+            if triggered_index is None:
+                if indata[i - start, 1] > 0.1:
+                    was_one = True
 
-            last_sample = indata[i - start, 1]
+                if was_one and indata[i - start, 1] < -0.1:
+                    triggered_index = i + 100 
+                    was_one = False
 
             if triggered_index is not None:
                 if buffer.end - triggered_index >= succ_samples:
                     zeros = np.zeros(fftsize)
-                    zeros[:succ_samples] = buffer.pop_slice(triggered_index, triggered_index + succ_samples) * np.hanning(succ_samples)
+                    slice = buffer.pop_slice(triggered_index, triggered_index + succ_samples)
+                    zeros[:succ_samples] = slice * np.hanning(succ_samples)
                     f = np.fft.rfft(zeros) 
                     power = (f*f.conjugate()).real / fftsize ** 2
-                    spectrum.append(power)
+                    if background is not None:
+                        power -= background
+                    spectrum.append(np.abs(power))
                     data.append(np.expand_dims(zeros, axis=1))
                     triggered_index = None
                     i += succ_samples - 1
                 else:
                     break
-
-#            if previous is not None:
-#                if previous.shape[0] >= succ_samples:
-#                    zeros = np.zeros(fftsize)
-#                    zeros[:succ_samples] = previous[:succ_samples] * np.hanning(succ_samples)
-#                    f = np.fft.rfft(zeros) 
-#                    power = (f*f.conjugate()).real / fftsize ** 2
-#                    spectrum.append(power)
-#                    dataa = np.expand_dims(zeros, axis=1)
-#                    data.append(dataa)
-#                    triggered_index = None
-#                    previous = None
-#                    i += succ_samples - 1
-#                else:
-#                    needed = succ_samples - previous.shape[0]
-#                    if indata[i:].shape[0] >= needed:
-#                        previous = np.concatenate((previous, indata[i:needed, 0]))
-#                        i += needed - 1
-#                    else:
-#                        previous = np.concatenate((previous, indata[i:, 0]))
-#                        i += indata[i:].shape[0]
 
             i += 1
 
@@ -105,6 +92,7 @@ def main():
 
         global running
         global use_trigger
+        global background
         while running:
             # poll for events
             # pygame.QUIT event means the user clicked X to close your window
@@ -113,6 +101,11 @@ def main():
                     running = False
                 elif event.type == pygame.KEYUP and event.key == pygame.K_t:
                     use_trigger = not use_trigger
+                elif event.type == pygame.KEYUP and event.key == pygame.K_b:
+                    if background is None:
+                        background = gui_spectrum
+                    else:
+                        background = None
 
             w, h = pygame.display.get_surface().get_size()
 
