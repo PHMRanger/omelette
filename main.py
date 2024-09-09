@@ -25,15 +25,17 @@ use_trigger = True
 
 triggered_index = None
 was_one = False
-background = None
 
 buffer = Buffer()
 
 def callback(indata, frames, time, status):
     if not use_trigger:
-        f = np.fft.rfft(indata[0:fftsize, 0] * np.hanning(fftsize)) 
-        power = (f*f.conjugate()).real / fftsize ** 2
-        spectrum.append(power)
+        i = 0
+        while i + fftsize < indata.shape[0]:
+            f = np.fft.rfft(indata[i:fftsize+i, 0] * np.hanning(fftsize)) 
+            power = (f*f.conjugate()).real / fftsize ** 2
+            spectrum.append(power)
+            i += fftsize
         data.append(indata.copy())
     else:
         if indata.shape[1] < 2:
@@ -47,7 +49,6 @@ def callback(indata, frames, time, status):
         
         i = buffer.end + 1
         start = buffer.end + 1
-        print(indata.shape)
         buffer.extend(indata[:, 0])
         end = buffer.end
 
@@ -67,9 +68,7 @@ def callback(indata, frames, time, status):
                     zeros[:succ_samples] = slice * np.hanning(succ_samples)
                     f = np.fft.rfft(zeros) 
                     power = (f*f.conjugate()).real / fftsize ** 2
-                    if background is not None:
-                        power -= background
-                    spectrum.append(np.abs(power))
+                    spectrum.append(power)
                     data.append(np.expand_dims(zeros, axis=1))
                     triggered_index = None
                     i += succ_samples - 1
@@ -83,8 +82,13 @@ def main():
     samplerate = int(device_info['default_samplerate'])
     channels = int(device_info['max_input_channels'])
 
-    gui_spectrum = None
+    bg_index = None
+    bg_spectrum = None
+    spectrum_index = 0
+    gui_spectrum = np.zeros((fftsize // 2 + 1, 16))
     gui_scope = None
+
+    font = pygame.font.SysFont('Arial', 16)
 
     print('samplerate:', samplerate)
 
@@ -103,10 +107,12 @@ def main():
                 elif event.type == pygame.KEYUP and event.key == pygame.K_t:
                     use_trigger = not use_trigger
                 elif event.type == pygame.KEYUP and event.key == pygame.K_b:
-                    if background is None:
-                        background = gui_spectrum
+                    if bg_spectrum is None:
+                        bg_index = 0
+                        bg_spectrum = np.zeros((fftsize // 2 + 1, 64))
                     else:
-                        background = None
+                        bg_spectrum = None
+                        bg_index = None
 
             w, h = pygame.display.get_surface().get_size()
 
@@ -114,11 +120,23 @@ def main():
             screen.fill(colors.GRAY_900)
 
             if len(spectrum) > 0:
-                gui_spectrum = spectrum.pop()
+                x = spectrum.pop()
+                gui_spectrum[:, spectrum_index] = x
+                spectrum_index = (spectrum_index + 1) % gui_spectrum.shape[1]
+                if bg_index is not None and bg_spectrum is not None:
+                    bg_spectrum[:, bg_index] = x
+                    bg_index = bg_index + 1
+                    if bg_index == bg_spectrum.shape[1]:
+                        bg_index = None
             if len(data) > 0:
                 gui_scope = data.pop()
 
-            draw_spectrum(screen, gui_spectrum, pygame.Rect(24, h/2 + 4, w - 48, h/2 - 28))
+            mean_spectrum = np.mean(gui_spectrum, axis=1)
+            if bg_spectrum is not None and bg_index is None:
+                mean_spectrum = mean_spectrum - np.mean(bg_spectrum, axis=1)
+                mean_spectrum = np.abs(mean_spectrum)
+
+            draw_spectrum(screen, mean_spectrum, pygame.Rect(24, h/2 + 4, w - 48, h/2 - 28))
 
             scope_rect = pygame.Rect(24, 24, w - 48, h/2 - 28)
             draw_scope(screen, scope_rect)
