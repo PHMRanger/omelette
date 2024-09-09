@@ -7,6 +7,8 @@ class Buffer:
         self.end = 0
 
     def extend(self, data):
+        if self.end - self.start + data.shape[0] > self.buffer.shape[0]:
+            self.pop_slice(0, self.end)
         self.buffer[self.end-self.start:self.end-self.start+data.shape[0]] = data
         self.end += data.shape[0]
 

@@ -47,6 +47,7 @@ def callback(indata, frames, time, status):
         
         i = buffer.end + 1
         start = buffer.end + 1
+        print(indata.shape)
         buffer.extend(indata[:, 0])
         end = buffer.end
 
